@@ -7,7 +7,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 BASE = os.path.expanduser('~/habit-agents')
 PORT = 8787
 REMINDER_TIME = '21:00'   # 매일 이 시각에 아직 안 한 습관 알림 (HH:MM, 끄려면 '')
-REPORT_PARENT_PAGE = ''  # 주간 리포트를 받을 노션 페이지 ID (README 참고, 비워두면 리포트 생략)
+REPORT_PARENT_PAGE = '36a95402c7248012be36c02a05c1ee37'  # "37세 100억" 페이지
 _last_report_attempt = 0
 
 def goals():
@@ -158,48 +158,112 @@ def build_status():
         }
     return res
 
+def _notion_req(method, url, payload, tk, ver):
+    req = urllib.request.Request(url,
+        data=json.dumps(payload).encode() if payload is not None else None,
+        headers={'Authorization': f'Bearer {tk}', 'Notion-Version': ver,
+                 'Content-Type': 'application/json'}, method=method)
+    with urllib.request.urlopen(req, timeout=12) as r:
+        return json.load(r)
+
+def notion_find(ds, key, tk):
+    """제목이 key인 페이지 검색 → (page_id, 누적분, url, ver) 또는 None"""
+    q = {'filter': {'property': '이름', 'title': {'equals': key}}, 'page_size': 1}
+    for url, ver in [(f'https://api.notion.com/v1/data_sources/{ds}/query', '2025-09-03'),
+                     (f'https://api.notion.com/v1/databases/{ds}/query', '2022-06-28')]:
+        try:
+            r = _notion_req('POST', url, q, tk, ver)
+            res = r.get('results', [])
+            if not res:
+                return None
+            p = res[0]
+            cur = (p.get('properties', {}).get('분', {}) or {}).get('number') or 0
+            return p['id'], int(cur), p.get('url'), ver
+        except Exception:
+            continue
+    return None
+
 def notion_create(habit, note, minutes, date_iso, tag=''):
+    """같은 활동(제목)은 같은 노션 페이지에 누적, 처음이면 새 페이지 생성"""
     tk = token()
     if not tk:
         return False, 'no-token', None
     g = goals().get(habit, {})
-    ds = str(g.get('notion_data_source','')).replace('collection://','')
+    ds = str(g.get('notion_data_source', '')).replace('collection://', '')
     if not ds:
         return False, 'no-db-id', None
-    title = note or f"{g.get('label','')} 세션"
-    if tag:
-        title = f"[{tag}] {title}" if not note else f"[{tag}] {note}"
+    key = (tag or note or f"{g.get('label','')} 세션").strip()
+    hist = f"{date_iso} · {minutes}분"
+    if tag and note:
+        hist += f" — {note}"
+    week = iso_week(datetime.date.fromisoformat(date_iso))
+
+    found = None
+    try:
+        found = notion_find(ds, key, tk)
+    except Exception:
+        found = None
+
+    if found:  # ── 기존 활동: 분 누적 + 이력 한 줄 추가 ──
+        pid, cur, url, ver = found
+        props = {'분': {'number': cur + minutes},
+                 '날짜': {'date': {'start': date_iso}},
+                 '주차': {'rich_text': [{'text': {'content': week}}]}}
+        last = ''
+        for ps in (props, {k: v for k, v in props.items() if k != '주차'}):
+            try:
+                _notion_req('PATCH', f'https://api.notion.com/v1/pages/{pid}',
+                            {'properties': ps}, tk, ver)
+                break
+            except Exception as e:
+                last = str(e)
+        else:
+            return False, f'update-failed {last[:200]}', url
+        try:
+            _notion_req('PATCH', f'https://api.notion.com/v1/blocks/{pid}/children',
+                {'children': [{'object': 'block', 'type': 'bulleted_list_item',
+                    'bulleted_list_item': {'rich_text': [{'text': {'content': hist}}]}}]},
+                tk, ver)
+        except Exception:
+            pass
+        return True, 'accumulated', url
+
+    # ── 새 활동: 페이지 생성 (+ 연습 이력 시작) ──
     props = {
-        '이름': {'title': [{'text': {'content': title}}]},
+        '이름': {'title': [{'text': {'content': key}}]},
         '날짜': {'date': {'start': date_iso}},
         '분': {'number': minutes},
+        '주차': {'rich_text': [{'text': {'content': week}}]},
     }
     if tag:
         props['태그'] = {'select': {'name': tag}}
-    props['주차'] = {'rich_text': [{'text': {'content': iso_week(datetime.date.fromisoformat(date_iso))}}]}
+    children = [
+        {'object': 'block', 'type': 'paragraph', 'paragraph':
+            {'rich_text': [{'text': {'content': '연습 이력'},
+                            'annotations': {'bold': True}}]}},
+        {'object': 'block', 'type': 'bulleted_list_item', 'bulleted_list_item':
+            {'rich_text': [{'text': {'content': hist}}]}},
+    ]
     propsets = [props]
-    if '태그' in props: propsets.append({k:v for k,v in props.items() if k!='태그'})
-    propsets.append({k:v for k,v in props.items() if k!='주차'})
-    propsets.append({k:v for k,v in props.items() if k not in ('태그','주차')})
-    attempts = []
-    for ps in propsets:
-        attempts.append(({'type':'data_source_id','data_source_id': ds}, '2025-09-03', ps))
-        attempts.append(({'type':'database_id','database_id': ds}, '2022-06-28', ps))
+    if '태그' in props:
+        propsets.append({k: v for k, v in props.items() if k != '태그'})
+    propsets.append({k: v for k, v in props.items() if k != '주차'})
+    propsets.append({k: v for k, v in props.items() if k not in ('태그', '주차')})
     last_err = ''
-    for parent, ver, props in attempts:
-        try:
-            req = urllib.request.Request('https://api.notion.com/v1/pages',
-                data=json.dumps({'parent': parent, 'properties': props}).encode(),
-                headers={'Authorization': f'Bearer {tk}', 'Notion-Version': ver,
-                         'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=12) as r:
-                resp = json.load(r)
-            return True, 'ok', resp.get('url')
-        except urllib.error.HTTPError as e:
-            try: last_err = e.read().decode()[:300]
-            except Exception: last_err = str(e)
-        except Exception as e:
-            last_err = str(e)
+    for ps in propsets:
+        for parent, ver in [({'type': 'data_source_id', 'data_source_id': ds}, '2025-09-03'),
+                            ({'type': 'database_id', 'database_id': ds}, '2022-06-28')]:
+            try:
+                resp = _notion_req('POST', 'https://api.notion.com/v1/pages',
+                    {'parent': parent, 'properties': ps, 'children': children}, tk, ver)
+                return True, 'created', resp.get('url')
+            except urllib.error.HTTPError as e:
+                try:
+                    last_err = e.read().decode()[:300]
+                except Exception:
+                    last_err = str(e)
+            except Exception as e:
+                last_err = str(e)
     return False, last_err, None
 
 def append_log(habit, minutes, note, synced, url, tag=''):
@@ -216,7 +280,6 @@ def report_state_path():
 
 def generate_weekly_report():
     """지난주(월~일) 리포트 페이지를 노션 부모 페이지에 생성"""
-    if not REPORT_PARENT_PAGE: return True, 'no-parent-configured'
     tk = token()
     if not tk: return False, 'no-token'
     t = datetime.date.today()
