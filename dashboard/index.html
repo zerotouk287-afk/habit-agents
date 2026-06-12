@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>습관 현황</title>
+<style>
+  :root{--bg:#101014;--card:#1b1b22;--line:rgba(255,255,255,.08);
+        --green:#34c759;--blue:#5e9bff;--gold:#ffd60a;
+        --dim:rgba(255,255,255,.22);--txt:#f2f2f5;--sub:rgba(255,255,255,.55)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:-apple-system,"Apple SD Gothic Neo",sans-serif;padding:34px 20px 60px}
+  h1{max-width:920px;margin:0 auto 6px;font-size:22px}
+  #sub{max-width:920px;margin:0 auto 24px;color:var(--sub);font-size:13px}
+  #grid{max-width:920px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px;
+        transition:box-shadow .4s, border-color .4s}
+  .card.glow{border-color:var(--green);box-shadow:0 0 0 3px rgba(52,199,89,.25),0 0 30px rgba(52,199,89,.25)}
+
+  .head{display:flex;align-items:center;gap:10px;margin-bottom:2px}
+  .head .emoji{font-size:24px}
+  .head .label{font-size:17px;font-weight:700;flex:1}
+  .lv{background:linear-gradient(135deg,#7b5cff,#5e9bff);font-size:12px;font-weight:800;
+      padding:4px 11px;border-radius:99px}
+  .cheer{font-size:12.5px;color:var(--gold);margin:4px 0 14px;min-height:15px}
+
+  .bigrow{display:flex;align-items:baseline;gap:10px}
+  .total{font-size:32px;font-weight:800;letter-spacing:-.5px}
+  .total small{font-size:12px;font-weight:500;color:var(--sub);margin-left:5px}
+  .delta{font-size:12.5px;font-weight:700}
+  .delta.up{color:var(--green)} .delta.down{color:#ff7b7b} .delta.flat{color:var(--sub)}
+
+  .xp{margin:13px 0 0}
+  .xptop{display:flex;justify-content:space-between;font-size:11.5px;color:var(--sub);margin-bottom:5px}
+  .bar{height:9px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:99px;width:0;transition:width .8s cubic-bezier(.2,.8,.2,1)}
+  .bar.xpfill i{background:linear-gradient(90deg,#7b5cff,#5e9bff)}
+  .bar.wkfill i{background:var(--green)}
+  .journey{font-size:11px;color:var(--sub);margin-top:5px}
+
+  .streak{display:flex;gap:14px;margin:14px 0 0;font-size:12.5px}
+  .streak b{font-size:14px}
+  .record{color:var(--gold);font-weight:700}
+
+  .dots{display:flex;gap:7px;margin-top:14px}
+  .dot{width:12px;height:12px;border-radius:50%;background:var(--dim)}
+  .dot.fill{background:var(--green)}
+  .dot.today{outline:2px solid rgba(255,255,255,.65);outline-offset:2px}
+
+  .heat{margin-top:16px}
+  .heatlabel{font-size:11px;color:var(--sub);margin-bottom:6px}
+  .heatgrid{display:grid;grid-template-columns:repeat(7,14px);grid-auto-rows:14px;gap:4px}
+  .cell{border-radius:3.5px;background:rgba(255,255,255,.07)}
+  .cell.f{visibility:hidden}
+  .cell.fut{background:transparent;border:1px dashed rgba(255,255,255,.18)}
+  .cell.l1{background:#1f4d2e}.cell.l2{background:#27713e}.cell.l3{background:#2f9a4f}.cell.l4{background:#34c759}
+  .cell.td{outline:1.5px solid rgba(255,255,255,.6)}
+
+  .tags{margin-top:16px;display:flex;flex-direction:column;gap:7px}
+  .trow{display:grid;grid-template-columns:90px 1fr 92px;align-items:center;gap:10px;font-size:12px}
+  .trow .tname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .trow .tbar{height:7px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+  .trow .tbar i{display:block;height:100%;border-radius:99px;background:var(--blue)}
+  .trow .tval{color:var(--sub);text-align:right}
+  .votes{font-size:12px;color:var(--sub);margin-top:3px}
+  .votes b{color:var(--txt)}
+  .nmt{margin-top:12px;background:rgba(255,179,64,.14);border:1px solid rgba(255,179,64,.4);
+       color:#ffc46b;font-size:12px;border-radius:10px;padding:8px 12px;font-weight:600}
+  #err{max-width:920px;margin:40px auto;color:var(--sub);text-align:center;display:none;line-height:1.7}
+</style>
+</head>
+<body>
+<h1>📋 오늘의 업무 보고</h1>
+<div id="sub"></div>
+<div id="grid"></div>
+<div id="err">서버에 연결할 수 없어요.<br><code>curl http://127.0.0.1:8787/status</code> 로 서버 상태를 확인해주세요.</div>
+<script>
+const API="http://127.0.0.1:8787";
+const ORDER=["dev","realestate","piano","language"];
+const LV_MIN=600; // 10시간 = 1레벨
+const CHEER=n=> n>=7?"완벽한 한 주!! 🎉👑": n>=5?"거의 다 왔어요! 🔥"
+            : n>=3?"좀만 더 힘내세요! 💪": n>=1?"좋은 시작이에요 ✨":"오늘 첫 발 떼볼까요? 🌱";
+const fmtH=m=>{const h=m/60;return (h%1===0?h.toFixed(0):h.toFixed(1));};
+
+function heatHTML(heat){
+  // 5주 × 7일, 월요일 시작. 강도: 0 / ~30 / ~60 / ~120 / 120+
+  return `<div class="heatgrid">`+heat.map(c=>{
+    if(c.m===-2) return `<div class="cell f"></div>`;
+    if(c.m===-1) return `<div class="cell fut"></div>`;
+    const today=c.d===new Date().toISOString().slice(0,10);
+    let l=""; if(c.m>0)l=c.m<30?"l1":c.m<60?"l2":c.m<120?"l3":"l4";
+    return `<div class="cell ${l}${today?" td":""}" title="${c.d} · ${fmtH(c.m)}h"></div>`;
+  }).join("")+`</div>`;
+}
+
+async function load(){
+  let st;
+  try{ st=await(await fetch(`${API}/status`)).json(); }
+  catch(e){ document.getElementById("err").style.display="block"; return; }
+  const now=new Date();
+  document.getElementById("sub").textContent=
+    `${now.getMonth()+1}월 ${now.getDate()}일 기준 · 매주 월요일 리셋 · 10시간마다 레벨 업`;
+  const grid=document.getElementById("grid"); grid.innerHTML="";
+  const todayIdx=(now.getDay()+6)%7;
+
+  for(const id of ORDER){
+    const s=st[id]; if(!s) continue;
+    const filled=s.week_days.filter(Boolean).length;
+    const lv=Math.floor(s.total_minutes/LV_MIN)+1;
+    const xp=s.total_minutes%LV_MIN, xpPct=Math.round(xp/LV_MIN*100);
+    const journey=s.total_target?Math.min(100,(s.total_minutes/s.total_target*100)):0;
+    const wkPct=s.weekly_target?Math.min(100,Math.round(s.week_minutes/s.weekly_target*100)):0;
+    const diff=s.week_minutes-s.last_week_minutes;
+    const dCls=diff>0?"up":diff<0?"down":"flat";
+    const dTxt=diff>0?`▲ ${fmtH(diff)}h`:diff<0?`▼ ${fmtH(-diff)}h`:"— 지난주와 동일";
+    const nearRecord=s.streak_best>s.streak_current&&s.streak_current>=3&&(s.streak_best-s.streak_current)<=2;
+    const isRecord=s.streak_current>0&&s.streak_current>=s.streak_best;
+
+    const card=document.createElement("div");
+    card.className="card"; card.id=id;
+    card.innerHTML=`
+      <div class="head"><span class="emoji">${s.emoji}</span><span class="label">${s.label}</span>
+        <span class="lv">Lv.${lv}</span></div>
+      <div class="cheer">이번 주 ${filled}/7 — ${CHEER(filled)}</div>
+      <div class="votes">🗳️ <b>"${s.label}"</b>라는 정체성에 <b>${s.votes||0}번</b> 투표했어요</div>
+      <div class="bigrow">
+        <span class="total">${fmtH(s.total_minutes)}h<small>누적</small></span>
+        <span class="delta ${dCls}">${dTxt} <small style="color:var(--sub);font-weight:400">(지난주 대비)</small></span>
+      </div>
+      <div class="xp">
+        <div class="xptop"><span>Lv.${lv} → Lv.${lv+1}</span><span>${fmtH(LV_MIN-xp)}h 남음</span></div>
+        <div class="bar xpfill"><i data-w="${xpPct}"></i></div>
+        <div class="journey">전체 여정 ${journey.toFixed(1)}% (목표 ${fmtH(s.total_target)}h)</div>
+      </div>
+      <div class="xp">
+        <div class="xptop"><span>주간 목표</span><span>${fmtH(s.week_minutes)}h / ${fmtH(s.weekly_target)}h (${wkPct}%)</span></div>
+        <div class="bar wkfill"><i data-w="${wkPct}"></i></div>
+      </div>
+      <div class="streak">
+        <span>🔥 현재 <b>${s.streak_current}</b>일 연속</span>
+        <span>🏆 최고 <b>${s.streak_best}</b>일</span>
+        ${isRecord&&s.streak_current>=3?`<span class="record">개인 신기록 진행 중!</span>`:""}
+        ${nearRecord?`<span class="record">신기록까지 ${s.streak_best-s.streak_current+1}일!</span>`:""}
+      </div>
+      <div class="dots">${s.week_days.map((d,i)=>
+        `<div class="dot${d?" fill":""}${i===todayIdx?" today":""}"></div>`).join("")}</div>
+      ${(!s.today_done && !s.yesterday_done && (s.votes||0)>0)
+        ? `<div class="nmt">⚠️ 어제 쉬었어요 — 한 번은 사고, 두 번은 습관. 오늘 5분이라도!</div>` : ""}
+      <div class="heat"><div class="heatlabel">잔디 · D+${s.day_n||1}일째</div>${heatHTML(s.heat)}</div>
+      ${(s.tags&&s.tags.length)?`<div class="tags">${(()=>{
+        const top=[...s.tags].sort((a,b)=>b.total_minutes-a.total_minutes).slice(0,5);
+        const mx=Math.max(...top.map(t=>t.total_minutes),1);
+        return top.map(t=>`<div class="trow">
+          <span class="tname">${t.name}</span>
+          <span class="tbar"><i style="width:${Math.round(t.total_minutes/mx*100)}%"></i></span>
+          <span class="tval">${fmtH(t.total_minutes)}h · 주 ${fmtH(t.week_minutes)}h</span>
+        </div>`).join("");})()}</div>`:""}`;
+    grid.appendChild(card);
+  }
+  requestAnimationFrame(()=>document.querySelectorAll(".bar i").forEach(b=>b.style.width=b.dataset.w+"%"));
+  const target=location.hash.slice(1);
+  if(target&&document.getElementById(target)){
+    const el=document.getElementById(target);
+    el.scrollIntoView({behavior:"smooth",block:"center"});
+    setTimeout(()=>el.classList.add("glow"),250);
+    setTimeout(()=>el.classList.remove("glow"),2600);
+  }
+}
+load(); setInterval(load,60*1000);
+</script>
+</body>
+</html>

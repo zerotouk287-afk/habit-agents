@@ -1,0 +1,6 @@
+.notion_token
+data/logs/*.jsonl
+data/.last_report
+data/.last_remind
+data/goals.json
+.DS_Store

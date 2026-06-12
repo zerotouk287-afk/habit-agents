@@ -1,0 +1,38 @@
+{
+  "dev": {
+    "label": "사이드 프로젝트",
+    "emoji": "💻",
+    "weekly_target_minutes": 600,
+    "total_target_minutes": 18000,
+    "started": "2026-06-15",
+    "notion_db": "사이드 프로젝트",
+    "notion_data_source": "collection://여기에-노션-DB-ID"
+  },
+  "realestate": {
+    "label": "부동산 공부",
+    "emoji": "🏠",
+    "weekly_target_minutes": 150,
+    "total_target_minutes": 1500,
+    "started": "2026-06-15",
+    "notion_db": "부동산 공부",
+    "notion_data_source": "collection://여기에-노션-DB-ID"
+  },
+  "piano": {
+    "label": "피아니스트",
+    "emoji": "🎹",
+    "weekly_target_minutes": 150,
+    "total_target_minutes": 1500,
+    "started": "2026-06-15",
+    "notion_db": "피아니스트",
+    "notion_data_source": "collection://여기에-노션-DB-ID"
+  },
+  "language": {
+    "label": "외국어 공부",
+    "emoji": "🌍",
+    "weekly_target_minutes": 300,
+    "total_target_minutes": 9000,
+    "started": "2026-06-15",
+    "notion_db": "외국어 공부",
+    "notion_data_source": "collection://여기에-노션-DB-ID"
+  }
+}

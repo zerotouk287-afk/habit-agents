@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root{ --green:#34c759; --amber:#ff9f0a; --dim:rgba(255,255,255,.35); }
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden;
+    font-family:-apple-system,"Apple SD Gothic Neo",sans-serif;-webkit-user-select:none;user-select:none}
+  #row{
+    position:fixed;left:0;right:0;bottom:0;
+    display:flex;justify-content:center;align-items:flex-end;gap:2.5vw;padding:0 2vw;
+    opacity:0;transform:translateY(60px);
+    transition:opacity .25s ease, transform .25s ease;
+    pointer-events:none;
+  }
+  #row.show{opacity:1;transform:translateY(0);pointer-events:auto}
+
+  .slot{display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+  .badge{display:flex;align-items:center;gap:8px;background:rgba(20,20,24,.72);
+    backdrop-filter:blur(8px);border-radius:999px;padding:5px 10px}
+    .dots{display:flex;gap:4px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+  .dot.fill{background:var(--green)}
+  .dot.today{outline:1.5px solid rgba(255,255,255,.7);outline-offset:1px}
+  .bub{position:relative;max-width:170px;background:rgba(20,20,24,.78);backdrop-filter:blur(8px);
+       border-radius:13px;padding:7px 11px;text-align:center;font-size:11px;line-height:1.45;
+       color:#fff;margin-bottom:4px}
+  .bub b{font-size:11.5px}
+  .bub:after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+       border:6px solid transparent;border-top-color:rgba(20,20,24,.78)}
+  .slot.done .bub{background:rgba(38,120,66,.85)}
+  .slot.done .bub:after{border-top-color:rgba(38,120,66,.85)}
+  .slot.misswarn .bub{background:rgba(196,120,20,.9)}
+  .slot.misswarn .bub:after{border-top-color:rgba(196,120,20,.9)}
+
+  .char{cursor:pointer;line-height:0;transition:transform .15s ease}
+  .char:hover{transform:translateY(-6px)}
+  .char img{display:block;height:215px;width:auto;pointer-events:none;
+    filter:grayscale(1) brightness(.78);transition:filter .9s ease}
+  .slot.done .char img{filter:none}
+
+  /* 입력 말풍선 */
+  #panel{
+    position:absolute;bottom:calc(100% + 14px);left:50%;transform:translateX(-50%) scale(.92);
+    width:280px;background:rgba(28,28,32,.93);backdrop-filter:blur(14px);
+    border-radius:18px;padding:14px;box-shadow:0 12px 36px rgba(0,0,0,.45);
+    opacity:0;pointer-events:none;transition:all .18s ease;color:#fff;z-index:10
+  }
+  #panel.open{opacity:1;pointer-events:auto;transform:translateX(-50%) scale(1)}
+  #panel:after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+    border:9px solid transparent;border-top-color:rgba(28,28,32,.93)}
+  #p-title{font-size:14px;font-weight:700;margin-bottom:4px}
+  #p-msg{font-size:12px;color:#ffd60a;min-height:15px;margin-bottom:8px}
+  #p-note{width:100%;box-sizing:border-box;background:rgba(255,255,255,.1);border:none;
+    border-radius:10px;padding:9px 10px;color:#fff;font-size:13px;outline:none}
+  #p-note::placeholder{color:rgba(255,255,255,.45)}
+  .chips{display:flex;gap:6px;margin:9px 0}
+  #p-recent{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+  #p-recent:empty{display:none}
+  .rc{font-size:11.5px;padding:5px 10px;border-radius:9px;background:rgba(255,255,255,.08);
+      cursor:pointer;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rc.sel{background:var(--green);font-weight:700}
+  #p-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+  .tag{font-size:11.5px;padding:5px 10px;border-radius:99px;background:rgba(255,255,255,.1);cursor:pointer}
+  .tag.sel{background:#5e9bff;font-weight:700}
+  #p-newtag{display:none;width:100%;box-sizing:border-box;margin-top:6px;background:rgba(255,255,255,.1);
+    border:none;border-radius:9px;padding:7px 10px;color:#fff;font-size:12px;outline:none}
+  .chip{flex:1;text-align:center;font-size:12px;padding:7px 0;border-radius:9px;
+    background:rgba(255,255,255,.1);cursor:pointer}
+  .chip.sel{background:var(--green);font-weight:700}
+  #p-custom{width:100%;box-sizing:border-box;background:rgba(255,255,255,.1);border:none;
+    border-radius:9px;padding:7px 10px;color:#fff;font-size:12px;outline:none;display:none}
+  #p-save{width:100%;margin-top:9px;padding:10px 0;border:none;border-radius:11px;
+    background:var(--green);color:#fff;font-size:14px;font-weight:700;cursor:pointer}
+  #p-save:disabled{opacity:.4}
+  #p-foot{display:flex;justify-content:space-between;margin-top:8px;font-size:11px}
+  #p-foot a{color:rgba(255,255,255,.55);text-decoration:none}
+  .pop{animation:pop .5s ease}
+  @keyframes pop{30%{transform:translateY(-14px) scale(1.06)}}
+</style>
+</head>
+<body>
+<div id="row"></div>
+
+<script>
+// ── 설정 ──────────────────────────────────────────────
+const API = "http://127.0.0.1:8787";
+const DASHBOARD = "http://127.0.0.1:8787/dashboard";
+const REVEAL_ZONE = 8, KEEP_ZONE = 360, HIDE_DELAY = 800;
+const CHARS = [
+  { id:"dev",        img:"dev.webp",        h:212 },
+  { id:"realestate", img:"realestate.webp", h:235 },
+  { id:"piano",      img:"piano.webp",      h:268 },
+  { id:"language",   img:"language.webp",   h:238 },
+];
+const TAG_SEED = {
+  language: ["EN","JP","CN"],
+  piano: [], dev: [], realestate: [],
+};
+const TAG_LABEL = { piano:"+새 곡", language:"+직접", dev:"+태그", realestate:"+태그" };
+let curTag = "";
+const HINT = {
+  dev:        "오늘 뭐 했어요? (예: 앱 온보딩 화면 개발)",
+  realestate: "오늘 뭐 했어요? (예: 청약 제도 공부, 임장)",
+  piano:      "오늘 뭐 했어요? (예: 쇼팽 녹턴 연습)",
+  language:   "오늘 뭐 했어요? (예: 영어 쉐도잉 [EN])",
+};
+const CHEER = n => n>=7 ? "완벽한 한 주!! 🎉👑"
+            : n>=5 ? "거의 다 왔어요! 🔥"
+            : n>=3 ? "좀만 더 힘내세요! 💪"
+            : n>=1 ? "좋은 시작이에요 ✨"
+            : "오늘 첫 발 떼볼까요? 🌱";
+// ──────────────────────────────────────────────────────
+
+const row = document.getElementById("row");
+let STATUS = {};
+
+// 캐릭터 슬롯 생성
+for (const c of CHARS){
+  const slot = document.createElement("div");
+  slot.className = "slot"; slot.dataset.id = c.id;
+  slot.innerHTML = `
+    <div class="bub"></div>
+    <div class="badge">
+      <div class="dots">${'<div class="dot"></div>'.repeat(7)}</div>
+    </div>
+    <div class="char"><img src="${c.img}" style="height:${c.h||230}px"></div>`;
+  slot.querySelector(".char").addEventListener("click", () => openPanel(c.id, slot));
+  row.appendChild(slot);
+}
+
+// 입력 말풍선 (하나를 공유)
+const panel = document.createElement("div");
+panel.id = "panel";
+panel.innerHTML = `
+  <div id="p-title"></div>
+  <div id="p-msg"></div>
+  <div id="p-recent"></div>
+  <input id="p-note" placeholder="오늘 뭐 했어요? (예: 쇼팽 녹턴 연습)">
+  <div id="p-tags"></div>
+  <input id="p-newtag" placeholder="새 태그 이름 (예: 녹턴 2번)">
+  <div class="chips">
+    ${[5,15,30,60,90].map(m=>`<div class="chip" data-m="${m}">${m}분</div>`).join("")}
+    <div class="chip" data-m="custom">직접</div>
+  </div>
+  <input id="p-custom" type="number" placeholder="분 입력 (예: 45)">
+  <button id="p-save">기록하기 ✅</button>
+  <div id="p-foot">
+    <a href="#" id="p-dash">📊 대시보드</a>
+    <a href="#" id="p-close">닫기</a>
+  </div>`;
+let curHabit = null, curMin = 0;
+
+function renderRecent(id){
+  const box = panel.querySelector("#p-recent");
+  const rec = (STATUS[id]||{}).recent || [];
+  box.innerHTML = rec.map((r,i)=>
+    `<div class="rc" data-i="${i}" title="${r.note}">↺ ${r.note}</div>`).join("");
+}
+
+function renderTags(id){
+  const box = panel.querySelector("#p-tags");
+  const fromStatus = ((STATUS[id]||{}).tags||[]).map(t=>t.name);
+  const names = [...new Set([...fromStatus, ...(TAG_SEED[id]||[])])].slice(0,8);
+  box.innerHTML = names.map(n=>`<div class="tag" data-t="${n}">${n}</div>`).join("")
+    + `<div class="tag" data-t="__new">${TAG_LABEL[id]||"+태그"}</div>`;
+  panel.querySelector("#p-newtag").style.display = "none";
+  panel.querySelector("#p-newtag").value = "";
+}
+
+function openPanel(id, slot){
+  if (panel.parentNode === slot && panel.classList.contains("open")) return closePanel();
+  curHabit = id; curMin = 0; curTag = "";
+  renderRecent(id);
+  renderTags(id);
+  slot.appendChild(panel);
+  const st = STATUS[id] || {};
+  const filled = (st.week_days||[]).filter(Boolean).length;
+  panel.querySelector("#p-title").textContent = `${st.emoji||""} ${st.label||id}`;
+  const nmt = (!st.today_done && !st.yesterday_done && (st.votes||0)>0) ? "두 번 연속은 안 돼요! " : "";
+  panel.querySelector("#p-msg").textContent = `${nmt}이번 주 ${filled}/7 — ${CHEER(filled)}`;
+  panel.querySelector("#p-note").value = "";
+  panel.querySelector("#p-note").placeholder = HINT[id] || "오늘 뭐 했어요?";
+  panel.querySelector("#p-custom").style.display = "none";
+  panel.querySelectorAll(".chip").forEach(ch=>ch.classList.remove("sel"));
+  panel.querySelector("#p-dash").onclick = e => { e.preventDefault(); window.open(`${DASHBOARD}#${id}`,"_blank"); };
+  requestAnimationFrame(()=>panel.classList.add("open"));
+  setTimeout(()=>panel.querySelector("#p-note").focus(), 200);
+}
+function closePanel(){ panel.classList.remove("open"); curHabit = null; }
+
+panel.addEventListener("click", e => {
+  const rc = e.target.closest(".rc");
+  if (rc){
+    const r = ((STATUS[curHabit]||{}).recent||[])[+rc.dataset.i];
+    if (r){
+      panel.querySelectorAll(".rc").forEach(x=>x.classList.remove("sel"));
+      rc.classList.add("sel");
+      panel.querySelector("#p-note").value = r.note;
+      curTag = r.tag || "";
+      panel.querySelectorAll(".tag").forEach(t=>{
+        t.classList.toggle("sel", !!r.tag && t.dataset.t === r.tag);
+      });
+      panel.querySelector("#p-newtag").style.display = "none";
+    }
+    return;
+  }
+  const tag = e.target.closest(".tag");
+  if (tag){
+    const nt = panel.querySelector("#p-newtag");
+    if (tag.dataset.t === "__new"){
+      nt.style.display = "block"; nt.focus();
+      panel.querySelectorAll(".tag").forEach(t=>t.classList.remove("sel"));
+      tag.classList.add("sel"); curTag = "";
+    } else if (tag.classList.contains("sel")){
+      tag.classList.remove("sel"); curTag = ""; nt.style.display = "none";
+    } else {
+      panel.querySelectorAll(".tag").forEach(t=>t.classList.remove("sel"));
+      tag.classList.add("sel"); curTag = tag.dataset.t; nt.style.display = "none";
+    }
+    return;
+  }
+  const chip = e.target.closest(".chip");
+  if (chip){
+    panel.querySelectorAll(".chip").forEach(c=>c.classList.remove("sel"));
+    chip.classList.add("sel");
+    const custom = panel.querySelector("#p-custom");
+    if (chip.dataset.m === "custom"){ custom.style.display="block"; custom.focus(); curMin = 0; }
+    else { custom.style.display="none"; curMin = +chip.dataset.m; }
+  }
+});
+panel.querySelector("#p-custom").addEventListener("input", e => curMin = +e.target.value || 0);
+panel.querySelector("#p-newtag").addEventListener("input", e => curTag = e.target.value.trim());
+panel.querySelector("#p-close").addEventListener("click", e => { e.preventDefault(); closePanel(); });
+
+panel.querySelector("#p-save").addEventListener("click", async () => {
+  if (!curHabit) return;
+  if (!curMin){ panel.querySelector("#p-msg").textContent = "몇 분 했는지 골라주세요!"; return; }
+  const btn = panel.querySelector("#p-save");
+  btn.disabled = true; btn.textContent = "기록 중…";
+  try{
+    const r = await fetch(`${API}/log`, { method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ habit:curHabit, minutes:curMin, tag:curTag,
+        note: panel.querySelector("#p-note").value.trim() })});
+    const d = await r.json();
+    if (d.saved){
+      STATUS = d.status || STATUS;
+      paint();
+      const slot = panel.parentNode;
+      slot.querySelector(".char").classList.add("pop");
+      setTimeout(()=>slot.querySelector(".char").classList.remove("pop"), 600);
+      const filled = (STATUS[curHabit].week_days||[]).filter(Boolean).length;
+      const voteMsg = curMin <= 10 ? `🗳️ 시작이 반! ${STATUS[curHabit].votes||""}번째 투표 ` : `🗳️ +1표 `;
+      panel.querySelector("#p-msg").textContent =
+        (d.notion ? "노션 기록 완료! " : "저장 완료 (노션은 나중에 /sync) ") + voteMsg + CHEER(filled);
+      btn.textContent = "기록 완료 🎉";
+      setTimeout(closePanel, 1400);
+    } else throw new Error(d.error||"fail");
+  }catch(err){
+    panel.querySelector("#p-msg").textContent = "서버가 안 켜져 있어요 (설치 가이드 참고)";
+    btn.textContent = "기록하기 ✅";
+  }
+  btn.disabled = false;
+  if (btn.textContent === "기록 중…") btn.textContent = "기록하기 ✅";
+});
+
+// 말풍선 멘트 (날짜+habit으로 고정 추첨 — 새로고침해도 안 바뀜, 매일 달라짐)
+const SAY_DONE = [
+  "오늘도 해냈어요! 멍! 🐾", "칭찬해요!! 자랑스러워 🎉", "역시 우리 주인! ✨",
+  "오늘 1표 적립 완료 🗳️", "최고예요, 내일 또 만나요 💚",
+];
+const SAY_WAIT = [
+  "기다리고 있어요 🥺", "5분만 같이 해요!", "얼른 와요~ 멍!",
+  "오늘 한 표 찍으러 와요 🗳️", "심심해요... 같이 해요!",
+];
+const SAY_MISS = [
+  "이틀은 안 돼요!! 멍멍!! 🚨", "어제도 못 봤어요... 오늘은 꼭! 🥺",
+  "두 번 거르면 습관 끊겨요! 5분만!",
+];
+function pick(arr, id){
+  const day = new Date().toISOString().slice(0,10);
+  let h = 0; for (const ch of day+id) h = (h*31 + ch.charCodeAt(0)) >>> 0;
+  return arr[h % arr.length];
+}
+
+// 신호등 + 주간 동그라미 칠하기
+function paint(){
+  const todayIdx = (new Date().getDay()+6)%7; // 월=0
+  for (const slot of document.querySelectorAll(".slot")){
+    const st = STATUS[slot.dataset.id]; if (!st) continue;
+    const miss = !st.today_done && !st.yesterday_done && (st.votes||0) > 0;
+    slot.classList.toggle("done", !!st.today_done);
+    slot.classList.toggle("misswarn", miss);
+    const msg = st.today_done ? pick(SAY_DONE, slot.dataset.id)
+              : miss ? pick(SAY_MISS, slot.dataset.id)
+              : pick(SAY_WAIT, slot.dataset.id);
+    slot.querySelector(".bub").innerHTML = `<b>${st.emoji} ${st.label}</b><br>${msg}`;
+    slot.querySelectorAll(".dot").forEach((d,i)=>{
+      d.className = "dot" + (st.week_days[i] ? " fill" : "") + (i===todayIdx ? " today" : "");
+    });
+  }
+}
+async function refresh(){
+  try{
+    STATUS = await (await fetch(`${API}/status`)).json();
+    paint();
+  }catch(e){ /* 서버 꺼짐: 불 안 켜짐 */ }
+}
+refresh();
+setInterval(refresh, 5*60*1000);
+
+// 화면 폭보다 캐릭터 줄이 넓으면 전체를 비율 축소 (잘림 방지)
+function fitRow(){
+  const imgs=[...row.querySelectorAll("img")];
+  if (imgs.some(i=>!i.complete||!i.naturalWidth)) return setTimeout(fitRow, 200);
+  let natural = window.innerWidth*0.04 + (imgs.length-1)*window.innerWidth*0.025;
+  imgs.forEach((img,i)=>{ natural += (CHARS[i].h||230) * img.naturalWidth / img.naturalHeight; });
+  const k = Math.min(1, window.innerWidth / natural);
+  imgs.forEach((img,i)=>{ img.style.height = Math.floor((CHARS[i].h||230)*k) + "px"; });
+}
+window.addEventListener("load", fitRow);
+window.addEventListener("resize", fitRow);   // 5분마다 갱신 (Claude Code로 기록한 것도 반영)
+
+// 독처럼 등장/퇴장
+let hideTimer = null;
+function reveal(){ clearTimeout(hideTimer); hideTimer=null; row.classList.add("show"); refresh(); }
+function scheduleHide(){
+  if (!row.classList.contains("show") || hideTimer) return;
+  hideTimer = setTimeout(()=>{ row.classList.remove("show"); closePanel(); hideTimer=null; }, HIDE_DELAY);
+}
+document.addEventListener("mousemove", e => {
+  if (PINNED) return;
+  const fb = window.innerHeight - e.clientY;
+  if (fb <= REVEAL_ZONE) reveal();
+  else if (fb <= KEEP_ZONE && row.classList.contains("show")) { clearTimeout(hideTimer); hideTimer=null; }
+  else if (!panel.classList.contains("open")) scheduleHide();
+});
+
+// #pin 으로 열면 항상 표시 (테스트용): index.html#pin
+const PINNED = location.hash === "#pin";
+
+// 처음 열리면 출근 인사: 잠깐 올라왔다가 들어감
+window.addEventListener("load", () => {
+  reveal();
+  if (!PINNED) hideTimer = setTimeout(()=>{ row.classList.remove("show"); hideTimer=null; }, 2500);
+});
+</script>
+</body>
+</html>
